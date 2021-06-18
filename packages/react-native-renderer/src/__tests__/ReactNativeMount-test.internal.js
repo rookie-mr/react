@@ -16,9 +16,14 @@ let ReactNative;
 let createReactNativeComponentClass;
 let UIManager;
 let TextInputState;
+let ReactNativePrivateInterface;
 
 const DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT =
   "Warning: dispatchCommand was called with a ref that isn't a " +
+  'native component. Use React.forwardRef to get access to the underlying native component';
+
+const SEND_ACCESSIBILITY_EVENT_REQUIRES_HOST_COMPONENT =
+  "Warning: sendAccessibilityEvent was called with a ref that isn't a " +
   'native component. Use React.forwardRef to get access to the underlying native component';
 
 describe('ReactNative', () => {
@@ -28,6 +33,7 @@ describe('ReactNative', () => {
     React = require('react');
     StrictMode = React.StrictMode;
     ReactNative = require('react-native-renderer');
+    ReactNativePrivateInterface = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface');
     UIManager = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
       .UIManager;
     createReactNativeComponentClass = require('react-native/Libraries/ReactPrivate/ReactNativePrivateInterface')
@@ -149,6 +155,65 @@ describe('ReactNative', () => {
     });
 
     expect(UIManager.dispatchViewManagerCommand).not.toBeCalled();
+  });
+
+  it('should call sendAccessibilityEvent for native refs', () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    ReactNativePrivateInterface.legacySendAccessibilityEvent.mockClear();
+
+    let viewRef;
+    ReactNative.render(
+      <View
+        ref={ref => {
+          viewRef = ref;
+        }}
+      />,
+      11,
+    );
+
+    expect(
+      ReactNativePrivateInterface.legacySendAccessibilityEvent,
+    ).not.toBeCalled();
+    ReactNative.sendAccessibilityEvent(viewRef, 'focus');
+    expect(
+      ReactNativePrivateInterface.legacySendAccessibilityEvent,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      ReactNativePrivateInterface.legacySendAccessibilityEvent,
+    ).toHaveBeenCalledWith(expect.any(Number), 'focus');
+  });
+
+  it('should warn and no-op if calling sendAccessibilityEvent on non native refs', () => {
+    class BasicClass extends React.Component {
+      render() {
+        return <React.Fragment />;
+      }
+    }
+
+    UIManager.sendAccessibilityEvent.mockReset();
+
+    let viewRef;
+    ReactNative.render(
+      <BasicClass
+        ref={ref => {
+          viewRef = ref;
+        }}
+      />,
+      11,
+    );
+
+    expect(UIManager.sendAccessibilityEvent).not.toBeCalled();
+    expect(() => {
+      ReactNative.sendAccessibilityEvent(viewRef, 'updateCommand', [10, 20]);
+    }).toErrorDev([SEND_ACCESSIBILITY_EVENT_REQUIRES_HOST_COMPONENT], {
+      withoutStack: true,
+    });
+
+    expect(UIManager.sendAccessibilityEvent).not.toBeCalled();
   });
 
   it('should not call UIManager.updateView from ref.setNativeProps for properties that have not changed', () => {
@@ -423,15 +488,7 @@ describe('ReactNative', () => {
     }));
 
     expect(() => ReactNative.render(<View>this should warn</View>, 11)).toThrow(
-      'Text string must be rendered within a <Text> component.\n\nText: this should warn',
-    );
-
-    expect(() =>
-      ReactNative.render(<View>{'x'.repeat(200)}</View>, 11),
-    ).toThrow(
-      `Text string must be rendered within a <Text> component.\n\nText: ${'x'.repeat(
-        88,
-      )} (truncated)`,
+      'Text strings must be rendered within a <Text> component.',
     );
 
     expect(() =>
@@ -441,9 +498,7 @@ describe('ReactNative', () => {
         </Text>,
         11,
       ),
-    ).toThrow(
-      'Text string must be rendered within a <Text> component.\n\nText: hi hello hi',
-    );
+    ).toThrow('Text strings must be rendered within a <Text> component.');
   });
 
   it('should not throw for text inside of an indirect <Text> ancestor', () => {
